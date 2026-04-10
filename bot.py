@@ -1,59 +1,74 @@
 import telebot
-from curl_cffi import requests
-import re
+from playwright.sync_api import sync_playwright
+import time
 
 # 🔑 توكن البوت
 TOKEN = "8781081982:AAF5NLXtFqZU8XGfm0u5ErfvFWTmWmsLO2k"
 bot = telebot.TeleBot(TOKEN)
 
+def scrape_with_browser(username):
+    results = []
+    with sync_playwright() as p:
+        # تشغيل متصفح خفي
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        
+        try:
+            # الدخول للموقع مباشرة
+            page.goto(f"https://breach.vip/", timeout=60000)
+            
+            # اختيار "Username" من القائمة المنسدلة
+            page.select_option("select[name='type']", "username")
+            
+            # كتابة اليوزر والبحث
+            page.fill("input[name='term']", username)
+            page.press("input[name='term']", "Enter")
+            
+            # الانتظار حتى تظهر النتائج (أو ننتظر قليلاً للـ JS)
+            time.sleep(5) 
+            
+            # الآن: "البحث في الصفحة" عن كل البلوكات التي تحتوي كلمة Instagram
+            # نستخدم كود JS داخل المتصفح لسحب البيانات تماماً كما تراها
+            insta_data = page.evaluate("""() => {
+                let found = [];
+                let items = document.querySelectorAll('pre'); // الموقع يعرض البيانات في tag pre
+                items.forEach(item => {
+                    let text = item.innerText;
+                    if (text.toLowerCase().includes('instagram')) {
+                        found.append(text);
+                    }
+                });
+                return found;
+            }""")
+            
+            # تنظيف البيانات المستخرجة
+            for entry in insta_data:
+                u_match = re.search(r"username\s*[:\s]\s*([^\n\r]+)", entry, re.IGNORECASE)
+                e_match = re.search(r"email\s*[:\s]\s*([^\n\r]+)", entry, re.IGNORECASE)
+                if u_match and e_match:
+                    results.append(f"👤 **User:** `{u_match.group(1).strip()}`\n📧 **Email:** `{e_match.group(1).strip()}`")
+
+        except Exception as e:
+            print(f"Browser Error: {e}")
+        finally:
+            browser.close()
+    return results
+
 @bot.message_handler(func=lambda m: True)
 def handle_search(message):
-    user_input = message.text.strip().replace('@', '')
-    wait_msg = bot.reply_to(message, "⏳ جاري استخراج بيانات Instagram من الـ API الخام...")
-
-    url = f"https://breach.vip/api/search/{user_input}?type=username"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://breach.vip/"
-    }
+    username = message.text.strip().replace('@', '')
+    wait_msg = bot.reply_to(message, "🔥 جاري تشغيل المتصفح الاحترافي للبحث عن Instagram...")
 
     try:
-        response = requests.get(url, headers=headers, impersonate="chrome110", timeout=30)
-        raw_data = response.text
-        
-        # طباعة أول جزء من البيانات للتأكد (ستظهر في Railway Logs)
-        print("--- RAW DATA PREVIEW ---")
-        print(raw_data[:1000])
+        final_results = scrape_with_browser(username)
 
-        # 🎯 الحل الذي اقترحته: البحث عن النمط الذي يحتوي instagram واليوزر والايميل معاً
-        # هذا النمط يبحث عن كلمة instagram ثم أي كلام، ثم username، ثم email
-        pattern = r"(instagram[^\n]*).*?username\s*[:\s]+([^\n\r]+).*?email\s*[:\s]+([^\n\r]+)"
-        results = re.findall(pattern, raw_data, re.IGNORECASE | re.DOTALL)
-
-        insta_results = []
-
-        for site_info, u, e in results:
-            u_clean = u.strip()
-            e_clean = e.strip()
-            
-            # التأكد أن النتيجة تخص اليوزر المطلوب (فلترة إضافية لضمان الدقة)
-            if user_input.lower() in u_clean.lower():
-                insta_results.append(f"📱 **Instagram Info:** `{site_info.strip()}`\n👤 **User:** `{u_clean}`\n📧 **Email:** `{e_clean}`")
-
-        if insta_results:
-            # مسح التكرار وإرسال النتائج
-            unique_res = list(set(insta_results))
-            msg = "✅ **تم بنجاح! هذي نتائج Instagram من البيانات الخام:**\n\n" + "\n\n---\n\n".join(unique_res)
+        if final_results:
+            msg = "✅ **نتائج Instagram (من المتصفح الحقيقي):**\n\n" + "\n\n---\n\n".join(list(set(final_results)))
             bot.edit_message_text(msg, message.chat.id, wait_msg.message_id, parse_mode="Markdown")
         else:
-            # إذا فشل النمط المركب، نجرب البحث عن أي بلوك فيه كلمة instagram فقط
-            # كحل أخير لنعرف أين المشكلة
-            if "instagram" in raw_data.lower():
-                bot.edit_message_text("❌ كلمة Instagram موجودة في البيانات، لكن النمط (User/Email) لم يتطابق. الموقع غير ترتيب الكلمات.", message.chat.id, wait_msg.message_id)
-            else:
-                bot.edit_message_text(f"❌ الـ API لم يرجع أي ذكر لـ Instagram لليوزر `{user_input}`.", message.chat.id, wait_msg.message_id)
-
-    except Exception as ex:
-        bot.edit_message_text(f"❌ خطأ في الاتصال بالسيرفر.", message.chat.id, wait_msg.message_id)
+            bot.edit_message_text(f"❌ حتى المتصفح لم يجد Instagram لليوزر `{username}`.", message.chat.id, wait_msg.message_id)
+            
+    except Exception as e:
+        bot.edit_message_text("❌ حدث خطأ في تشغيل محرك البحث.", message.chat.id, wait_msg.message_id)
 
 bot.infinity_polling()
