@@ -2,13 +2,14 @@ import telebot
 from curl_cffi import requests
 import re
 
+# 🔑 توكن البوت
 TOKEN = "8781081982:AAF5NLXtFqZU8XGfm0u5ErfvFWTmWmsLO2k"
 bot = telebot.TeleBot(TOKEN)
 
 @bot.message_handler(func=lambda m: True)
 def handle_search(message):
     user_input = message.text.strip().replace('@', '')
-    wait_msg = bot.reply_to(message, "⏳ جاري الفحص والفلترة بالتحسينات الجديدة...")
+    wait_msg = bot.reply_to(message, "⏳ جاري استخراج بيانات Instagram من الـ API الخام...")
 
     url = f"https://breach.vip/api/search/{user_input}?type=username"
     headers = {
@@ -20,46 +21,39 @@ def handle_search(message):
         response = requests.get(url, headers=headers, impersonate="chrome110", timeout=30)
         raw_data = response.text
         
-        # التحسين الذي اقترحته لمعاينة الرد في الكونسول
-        print("--- بداية الرد ---")
-        print(raw_data[:1000]) 
-        print("--- نهاية الرد ---")
+        # طباعة أول جزء من البيانات للتأكد (ستظهر في Railway Logs)
+        print("--- RAW DATA PREVIEW ---")
+        print(raw_data[:1000])
 
-        # 1. تقسيم النص إلى بلوكات عند كل نتيجة (غالباً تفصل بينها كلمة Instagram أو فواصل)
-        # استخدمنا Instagram كفاصل لضمان عزل البيانات
-        sections = re.split(r"Instagram", raw_data, flags=re.IGNORECASE)
-        
+        # 🎯 الحل الذي اقترحته: البحث عن النمط الذي يحتوي instagram واليوزر والايميل معاً
+        # هذا النمط يبحث عن كلمة instagram ثم أي كلام، ثم username، ثم email
+        pattern = r"(instagram[^\n]*).*?username\s*[:\s]+([^\n\r]+).*?email\s*[:\s]+([^\n\r]+)"
+        results = re.findall(pattern, raw_data, re.IGNORECASE | re.DOTALL)
+
         insta_results = []
 
-        for section in sections[1:]: # نبدأ من بعد أول كلمة Instagram
-            # الـ Regex المحسن الذي اقترحته أنت (يلقط اليوزر والايميل حتى لو بينهم أسطر)
-            results = re.findall(
-                r"username\s*[:\s]+([^\n\r]+).*?email\s*[:\s]+([^\n\r]+)",
-                section,
-                re.IGNORECASE | re.DOTALL
-            )
-
-            for u, e in results:
-                username_clean = u.strip()
-                email_clean = e.strip()
-                
-                # التحقق أن اليوزر المطلوب موجود في النتيجة
-                if user_input.lower() in username_clean.lower():
-                    insta_results.append(f"👤 **User:** `{username_clean}`\n📧 **Email:** `{email_clean}`")
+        for site_info, u, e in results:
+            u_clean = u.strip()
+            e_clean = e.strip()
+            
+            # التأكد أن النتيجة تخص اليوزر المطلوب (فلترة إضافية لضمان الدقة)
+            if user_input.lower() in u_clean.lower():
+                insta_results.append(f"📱 **Instagram Info:** `{site_info.strip()}`\n👤 **User:** `{u_clean}`\n📧 **Email:** `{e_clean}`")
 
         if insta_results:
-            msg = "✅ **نتائج Instagram المستخرجة:**\n\n" + "\n\n---\n\n".join(insta_results[:10])
+            # مسح التكرار وإرسال النتائج
+            unique_res = list(set(insta_results))
+            msg = "✅ **تم بنجاح! هذي نتائج Instagram من البيانات الخام:**\n\n" + "\n\n---\n\n".join(unique_res)
             bot.edit_message_text(msg, message.chat.id, wait_msg.message_id, parse_mode="Markdown")
         else:
-            # الحل البديل الذي اقترحته: البحث عن أي إيميل في الصفحة إذا فشلت الفلترة
-            emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', raw_data)
-            if emails:
-                msg = "⚠️ لم أجد تنسيق Instagram المعتاد، لكن هذه الإيميلات الموجودة في الصفحة:\n\n" + "\n".join(set(emails))
-                bot.edit_message_text(msg, message.chat.id, wait_msg.message_id)
+            # إذا فشل النمط المركب، نجرب البحث عن أي بلوك فيه كلمة instagram فقط
+            # كحل أخير لنعرف أين المشكلة
+            if "instagram" in raw_data.lower():
+                bot.edit_message_text("❌ كلمة Instagram موجودة في البيانات، لكن النمط (User/Email) لم يتطابق. الموقع غير ترتيب الكلمات.", message.chat.id, wait_msg.message_id)
             else:
-                bot.edit_message_text("❌ لم يتم العثور على أي بيانات أو إيميلات. قد تكون الحماية مفعلة.", message.chat.id, wait_msg.message_id)
+                bot.edit_message_text(f"❌ الـ API لم يرجع أي ذكر لـ Instagram لليوزر `{user_input}`.", message.chat.id, wait_msg.message_id)
 
-    except Exception as e:
-        bot.edit_message_text(f"❌ خطأ فني: {str(e)}", message.chat.id, wait_msg.message_id)
+    except Exception as ex:
+        bot.edit_message_text(f"❌ خطأ في الاتصال بالسيرفر.", message.chat.id, wait_msg.message_id)
 
 bot.infinity_polling()
