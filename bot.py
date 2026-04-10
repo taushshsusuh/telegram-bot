@@ -8,48 +8,45 @@ bot = telebot.TeleBot(TOKEN)
 @bot.message_handler(func=lambda m: True)
 def handle_search(message):
     user_input = message.text.strip().replace('@', '')
-    wait_msg = bot.reply_to(message, "⏳ جاري الفحص الدقيق للأسطر...")
+    wait_msg = bot.reply_to(message, "⏳ جاري الفحص... إذا فشل هذه المرة سأخبرك بالسبب الدقيق.")
 
     url = f"https://breach.vip/api/search/{user_input}?type=username"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Referer": "https://breach.vip/"
+    }
 
     try:
         response = requests.get(url, headers=headers, impersonate="chrome110", timeout=30)
         raw_data = response.text
+        
+        # ميزة للمطور (أنت): اطبع أول 200 حرف في الكونسول عشان تشيك
+        print(f"DEBUG: Response length: {len(raw_data)}")
 
-        # التأكد من وجود كلمة انستقرام في الصفحة كاملة
-        if "instagram" in raw_data.lower():
-            
-            # 1. تقسيم النص إلى بلوكات عند كل كلمة Instagram
-            # عشان نضمن إننا نسحب اليوزر والإيميل اللي "تحت" كلمة انستقرام مو غيرها
-            sections = re.split(r"Instagram", raw_data, flags=re.IGNORECASE)
-            
+        # البحث عن النمط بغض النظر عن المسافات أو الأسطر
+        # النمط: كلمة Instagram يتبعها أي كلام لين يلقى username ثم قيمة ثم email ثم قيمة
+        pattern = r"Instagram.*?username\s+([^\s\n]+).*?email\s+([^\s\n]+)"
+        results = re.findall(pattern, raw_data, re.IGNORECASE | re.DOTALL)
+
+        if results:
             insta_results = []
-
-            for section in sections[1:]: # نتجاهل النص اللي قبل أول كلمة Instagram
-                
-                # 2. ريجكس (Regex) عبقري: 
-                # يبحث عن كلمة username ثم يتجاهل أي مسافات أو أسطر \s* # ثم يلقط الكلمة اللي بعدها مباشرة (اليوزر)
-                u_match = re.search(r"username\s+([^\s]+)", section, re.IGNORECASE)
-                e_match = re.search(r"email\s+([^\s]+)", section, re.IGNORECASE)
-
-                if u_match and e_match:
-                    u = u_match.group(1).strip()
-                    e = e_match.group(1).strip()
-                    
-                    # التحقق أن اليوزر هو نفسه اللي بحثنا عنه (فلترة إضافية)
-                    if user_input.lower() in u.lower():
-                        insta_results.append(f"👤 `{u}`\n📧 `{e}`")
-
-            if insta_results:
-                msg = "✅ **نتائج Instagram المستخرجة:**\n\n" + "\n\n---\n\n".join(insta_results[:5])
-                bot.edit_message_text(msg, message.chat.id, wait_msg.message_id, parse_mode="Markdown")
-            else:
-                bot.edit_message_text("❌ القسم موجود، لكن لم أستطع سحب اليوزر والايميل منه (تنسيق مختلف).", message.chat.id, wait_msg.message_id)
+            for u, e in results:
+                insta_results.append(f"👤 **User:** `{u}`\n📧 **Email:** `{e}`")
+            
+            msg = "✅ **نتائج Instagram المستخرجة:**\n\n" + "\n\n---\n\n".join(insta_results)
+            bot.edit_message_text(msg, message.chat.id, wait_msg.message_id, parse_mode="Markdown")
+        
         else:
-            bot.edit_message_text("❌ لم يتم العثور على كلمة Instagram في كامل الصفحة.", message.chat.id, wait_msg.message_id)
+            # إذا ما لقى بالنمط، نجرب نبحث عن الإيميلات فقط كحل أخير
+            emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', raw_text)
+            if emails:
+                msg = "⚠️ لم أجد قسم Instagram مرتب، لكن وجدت هذه الإيميلات في الصفحة:\n\n" + "\n".join(set(emails))
+                bot.edit_message_text(msg, message.chat.id, wait_msg.message_id)
+            else:
+                bot.edit_message_text("❌ الموقع لم يرجع أي بيانات نصية (ربما حماية Cloudflare منعتني).", message.chat.id, wait_msg.message_id)
 
-    except Exception as ex:
-        bot.edit_message_text("❌ حدث خطأ فني، الموقع قد يكون حظر الطلب.", message.chat.id, wait_msg.message_id)
+    except Exception as e:
+        bot.edit_message_text(f"❌ خطأ فني: {str(e)}", message.chat.id, wait_msg.message_id)
 
 bot.infinity_polling()
