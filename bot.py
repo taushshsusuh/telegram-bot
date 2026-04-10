@@ -9,9 +9,8 @@ bot = telebot.TeleBot(TOKEN)
 @bot.message_handler(func=lambda m: True)
 def handle_search(message):
     user_input = message.text.strip().replace('@', '')
-    wait_msg = bot.reply_to(message, "⏳ جاري البحث والفلترة بطريقة الفيديو...")
+    wait_msg = bot.reply_to(message, "⏳ جاري الفلترة النهائية... تكفى هالمرة يضبط")
 
-    # الرابط المباشر مع تحديد نوع البحث يوزرنيم
     url = f"https://breach.vip/api/search/{user_input}?type=username"
     
     headers = {
@@ -20,47 +19,40 @@ def handle_search(message):
     }
 
     try:
-        # نطلب الاستجابة كـ "نص خام" عشان نتفادى خطأ JSON اللي طلع لك
         response = requests.get(url, headers=headers, impersonate="chrome110", timeout=30)
-        raw_data = response.text # هنا نأخذ النص مهما كان شكله
+        raw_data = response.text
 
         if response.status_code == 200:
-            # محاكاة "البحث في الصفحة" عن أي بلوك يحتوي Instagram
-            # الكود بيبحث عن كلمة Instagram وبياخذ اللي تحتها لين يوصل لفاصل ---
-            sections = re.findall(r"(Instagram.*?(?=-{3,}|$))", raw_data, re.DOTALL | re.IGNORECASE)
+            # تقسيم الصفحة بناءً على أي شيء يشبه الفاصل
+            sections = re.split(r'-{3,}|Instagram', raw_data, flags=re.IGNORECASE)
             
             final_results = []
 
             for section in sections:
-                # تنظيف النص وتقسيمه لأسطر
-                lines = [l.strip() for l in section.splitlines() if l.strip()]
-                
-                res_user = None
-                res_email = None
+                # نبحث عن نمط: كلمة username بعدها أي كلام، ثم كلمة email بعدها أي كلام
+                # هذا النمط يتجاهل إذا كانت في سطر واحد أو سطرين
+                user_match = re.search(r"username\s*[\s\n\r:]+([^\n\r\-]+)", section, re.IGNORECASE)
+                email_match = re.search(r"email\s*[\s\n\r:]+([^\n\r\-]+)", section, re.IGNORECASE)
 
-                for i in range(len(lines)):
-                    # إذا لقى سطر فيه كلمة username (بأي شكل) ياخذ السطر اللي بعده
-                    if "username" in lines[i].lower() and (i + 1) < len(lines):
-                        res_user = lines[i+1]
-                    # إذا لقى سطر فيه كلمة email ياخذ السطر اللي بعده
-                    if "email" in lines[i].lower() and (i + 1) < len(lines):
-                        res_email = lines[i+1]
-
-                if res_user and res_email:
-                    final_results.append(f"👤 **User:** `{res_user}`\n📧 **Email:** `{res_email}`")
+                if user_match and email_match:
+                    u_val = user_match.group(1).strip()
+                    e_val = email_match.group(1).strip()
+                    
+                    # نفلتر فقط النتائج اللي لها علاقة باليوزر اللي بحثت عنه أو فيها ريحة انستقرام
+                    final_results.append(f"👤 **User:** `{u_val}`\n📧 **Email:** `{e_val}`")
 
             if final_results:
-                # حذف التكرار وإرسال النتيجة
+                # إزالة التكرار
                 unique_res = list(set(final_results))
-                response_msg = "📸 **نتائج Instagram المكتشفة:**\n\n" + "\n\n---\n\n".join(unique_res)
+                response_msg = "✅ **هذي البيانات اللي قدرت أصيدها:**\n\n" + "\n\n---\n\n".join(unique_res)
                 bot.reply_to(message, response_msg, parse_mode="Markdown")
                 bot.delete_message(message.chat.id, wait_msg.message_id)
             else:
-                bot.edit_message_text(f"❌ لم أجد أقسام Instagram لهذا اليوزر في الصفحة.", message.chat.id, wait_msg.message_id)
+                bot.edit_message_text(f"❌ الموقع رجع بيانات بس مالقيت فيها 'username' و 'email' تحت بعض.", message.chat.id, wait_msg.message_id)
         else:
-            bot.edit_message_text(f"⚠️ الموقع محمي حالياً (Cloudflare). جرب لاحقاً.", message.chat.id, wait_msg.message_id)
+            bot.edit_message_text("⚠️ حماية Cloudflare قوية الحين، انتظر 5 دقائق وجرب.", message.chat.id, wait_msg.message_id)
 
     except Exception as e:
-        bot.edit_message_text("❌ حدث خطأ في الاتصال، حاول مرة أخرى.", message.chat.id, wait_msg.message_id)
+        bot.edit_message_text("❌ حدث خطأ، الموقع شكله قفل الطلبات حالياً.", message.chat.id, wait_msg.message_id)
 
 bot.infinity_polling()
