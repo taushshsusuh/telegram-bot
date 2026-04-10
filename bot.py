@@ -1,83 +1,79 @@
-import requests
 import telebot
+import cloudscraper # المكتبة السحرية لتجاوز الحماية
 
 # 🔑 التوكن الخاص بك
 TOKEN = "8781081982:AAF5NLXtFqZU8XGfm0u5ErfvFWTmWmsLO2k"
-
 bot = telebot.TeleBot(TOKEN)
+
+# إنشاء كائن scraper لتجاوز Cloudflare
+scraper = cloudscraper.create_scraper()
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "🔎 أرسل اليوزر للبحث عن اختراقات انستقرام فقط")
+    bot.reply_to(message, "🔎 أرسل اليوزر لجلب بيانات Instagram فقط.")
 
 @bot.message_handler(func=lambda m: True)
 def search_user(message):
     username = message.text.strip()
-    wait_msg = bot.reply_to(message, f"⏳ جاري البحث عن `{username}` في قواعد بيانات انستقرام...")
+    wait_msg = bot.reply_to(message, f"⏳ جاري فك الحماية والبحث عن `{username}`...")
 
-    # الرابط الفعلي الذي يستخدمه الموقع للبحث
+    # الرابط والبارامترات
     url = "https://breach.vip/api/search"
-    
-    # البيانات المطلوبة لمحاكاة البحث كـ Username
-    params = {
-        "term": username,
-        "type": "username"  # هنا حددنا نوع البحث كما في الصورة
-    }
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://breach.vip/",
-        "Accept": "application/json, text/plain, */*"
-    }
+    params = {"term": username, "type": "username"}
 
     try:
-        # إرسال طلب البحث
-        res = requests.get(url, params=params, headers=headers, timeout=15)
+        # استخدام scraper بدلاً من requests
+        res = scraper.get(url, params=params, timeout=20)
 
         if res.status_code != 200:
-            bot.edit_message_text("❌ الموقع رفض الطلب أو محمي حالياً. جرب لاحقاً.", message.chat.id, wait_msg.message_id)
+            bot.edit_message_text(f"❌ فشل الاتصال. كود الخطأ: {res.status_code}", message.chat.id, wait_msg.message_id)
             return
 
-        # الموقع يرجع البيانات غالباً بصيغة JSON أو نص منسق
-        data = res.text
+        text_data = res.text
         
-        if "<html" in data.lower():
-            bot.edit_message_text("⚠️ الموقع يطلب توثيق (Cloudflare). لا يمكن للبوت تجاوزه حالياً.", message.chat.id, wait_msg.message_id)
-            return
-
-        # فلترة النتائج لاستخراج بلوكات انستقرام فقط
-        lines = data.splitlines()
-        extracted_results = []
-        is_instagram = False
-        current_block = []
+        # تقسيم البيانات إلى أسطر
+        lines = text_data.splitlines()
+        
+        instagram_results = []
+        capture = False
+        temp_block = []
 
         for line in lines:
-            # بداية بلوك جديد (بناءً على شكل الموقع في الصور)
-            if "---" in line or ".com" in line or "Instagram" in line:
-                if is_instagram and current_block:
-                    extracted_results.append("\n".join(current_block))
-                
-                current_block = []
-                is_instagram = "instagram" in line.lower()
+            line_clean = line.strip()
             
-            current_block.append(line.strip())
+            # إذا وجدنا كلمة انستقرام نبدأ السحب
+            if "instagram" in line_clean.lower():
+                capture = True
+                if temp_block: # حفظ البلوك السابق إذا كان موجوداً
+                    instagram_results.append("\n".join(temp_block))
+                temp_block = []
 
-        # إضافة آخر بلوك إذا كان انستقرام
-        if is_instagram and current_block:
-            extracted_results.append("\n".join(current_block))
+            # إذا وجدنا بداية بلوك جديد لخدمة أخرى نتوقف عن السحب
+            elif capture and (".com" in line_clean.lower() or "---" in line_clean):
+                 if "instagram" not in line_clean.lower():
+                    instagram_results.append("\n".join(temp_block))
+                    temp_block = []
+                    capture = False
 
-        if not extracted_results:
-            bot.edit_message_text(f"❌ لم يتم العثور على نتائج انستقرام لـ `{username}`.", message.chat.id, wait_msg.message_id)
+            if capture and line_clean:
+                temp_block.append(line_clean)
+
+        # إضافة آخر بلوك تم سحبه
+        if capture and temp_block:
+            instagram_results.append("\n".join(temp_block))
+
+        if not instagram_results:
+            bot.edit_message_text(f"❌ لم يتم العثور على أي حسابات Instagram لليوزر: `{username}`", message.chat.id, wait_msg.message_id)
         else:
-            final_text = "📸 **نتائج Instagram المستخرجة:**\n\n" + "\n\n--- \n\n".join(extracted_results)
-            # تقسيم الرسالة إذا كانت طويلة جداً
-            if len(final_text) > 4096:
-                bot.edit_message_text(final_text[:4000] + "...", message.chat.id, wait_msg.message_id)
-            else:
-                bot.edit_message_text(final_text, message.chat.id, wait_msg.message_id, parse_mode="Markdown")
+            # تجميع النتائج بشكل مرتب
+            final_output = "✅ **نتائج انستقرام المستخرجة:**\n\n"
+            for result in instagram_results:
+                final_output += f"```{result}```\n\n"
+            
+            bot.edit_message_text(final_output[:4096], message.chat.id, wait_msg.message_id, parse_mode="Markdown")
 
     except Exception as e:
-        bot.edit_message_text(f"⚠️ خطأ أثناء البحث: {str(e)}", message.chat.id, wait_msg.message_id)
+        bot.edit_message_text(f"⚠️ حدث خطأ أثناء التجاوز:\n`{str(e)}`", message.chat.id, wait_msg.message_id, parse_mode="Markdown")
 
-print("Bot is running...")
+print("Bot is running with Cloudflare Bypass...")
 bot.infinity_polling()
