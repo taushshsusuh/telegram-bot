@@ -1,3 +1,2 @@
 pyTelegramBotAPI
-requests
-cloudscraper
+curl_cffi
