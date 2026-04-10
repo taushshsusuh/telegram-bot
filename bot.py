@@ -9,10 +9,9 @@ bot = telebot.TeleBot(TOKEN)
 @bot.message_handler(func=lambda m: True)
 def handle_search(message):
     user_input = message.text.strip().replace('@', '')
-    # رسالة انتظار بسيطة كما طلبت
     wait_msg = bot.reply_to(message, "⏳ جاري البحث...")
 
-    # طلب البحث مع تحديد النوع كـ Username
+    # طلب البحث مع التأكيد على نوع اليوزر
     search_url = f"https://breach.vip/api/search/{user_input}?type=username"
     
     headers = {
@@ -21,41 +20,44 @@ def handle_search(message):
     }
 
     try:
-        # محاكاة المتصفح لتخطي صفحة الحماية
+        # تجاوز الحماية
         response = requests.get(search_url, headers=headers, impersonate="chrome110", timeout=30)
 
         if response.status_code == 200:
             full_text = response.text
             
-            # التأكد من وجود قسم الانستقرام المطلوب
-            target_section = "Instagram (Selfie Recovery Exploit)"
-            if target_section in full_text:
-                # استخراج الجزء الذي يلي القسم المطلوب مباشرة
-                start_index = full_text.find(target_section)
-                # نأخذ 500 حرف بعد العنوان لضمان شمول اليوزر والايميل
-                relevant_part = full_text[start_index:start_index+500]
+            # 1. تحديد القسم المطلوب بدقة
+            target_header = "Instagram (Selfie Recovery Exploit)"
+            
+            if target_header in full_text:
+                # 2. قص النص لتبدأ من القسم المطلوب فقط وتجاهل ما قبله
+                start_pos = full_text.find(target_header)
+                # نأخذ بلوك كافي من البيانات بعد العنوان (مثلاً 1000 حرف)
+                relevant_data = full_text[start_pos:start_pos + 1000]
+                
+                # 3. البحث عن أول username وأول email يظهرون بوضوح في هذا القسم
+                # نبحث عن السطر اللي يبدأ بـ username ثم فراغ ثم القيمة
+                username_match = re.search(r"username\s+([^\n\r]+)", relevant_data, re.IGNORECASE)
+                email_match = re.search(r"email\s+([^\n\r]+)", relevant_data, re.IGNORECASE)
 
-                # استخدام Regex لاستخراج اليوزر والايميل من النص
-                found_user = re.search(r"username\s+(.*)", relevant_part)
-                found_email = re.search(r"email\s+([\w\.-]+@[\w\.-]+)", relevant_part)
+                if username_match and email_match:
+                    found_user = username_match.group(1).strip()
+                    found_email = email_match.group(1).strip()
 
-                if found_user and found_email:
-                    res_username = found_user.group(1).strip()
-                    res_email = found_email.group(1).strip()
-
-                    # الرد النهائي بالبيانات فقط
-                    result_msg = f"✅ **تم العثور على البيانات:**\n\n" \
-                                 f"👤 **Username:** `{res_username}`\n" \
-                                 f"📧 **Email:** `{res_email}`"
-                    bot.edit_message_text(result_msg, message.chat.id, wait_msg.message_id, parse_mode="Markdown")
+                    # الرد باليوزر والايميل فقط رداً على رسالة المستخدم
+                    final_response = f"👤 **Username:** `{found_user}`\n📧 **Email:** `{found_email}`"
+                    bot.reply_to(message, final_response, parse_mode="Markdown")
+                    
+                    # حذف رسالة "جاري البحث" لتنظيف الشات
+                    bot.delete_message(message.chat.id, wait_msg.message_id)
                 else:
-                    bot.edit_message_text("❌ القسم موجود ولكن لم أستطع استخراج البيانات بدقة.", message.chat.id, wait_msg.message_id)
+                    bot.edit_message_text("❌ وجدنا القسم ولكن لم نجد بيانات داخله.", message.chat.id, wait_msg.message_id)
             else:
-                bot.edit_message_text(f"❌ لم يتم العثور على `{user_input}` في قسم Instagram بالموقع.", message.chat.id, wait_msg.message_id)
+                bot.edit_message_text("❌ لم يتم العثور على سجلات Instagram لهذا اليوزر.", message.chat.id, wait_msg.message_id)
         else:
-            bot.edit_message_text("⚠️ فشل في الوصول للموقع، قد تكون الحماية مفعلة حالياً.", message.chat.id, wait_msg.message_id)
+            bot.edit_message_text(f"⚠️ خطأ في الاتصال بالموقع (كود {response.status_code})", message.chat.id, wait_msg.message_id)
 
     except Exception as e:
-        bot.edit_message_text(f"❌ خطأ: {str(e)}", message.chat.id, wait_msg.message_id)
+        bot.edit_message_text(f"❌ حدث خطأ: {str(e)}", message.chat.id, wait_msg.message_id)
 
 bot.infinity_polling()
