@@ -1,60 +1,61 @@
 import telebot
 from curl_cffi import requests
+import re
 
-# 🔑 توكن البوت الخاص بك
+# 🔑 توكن البوت
 TOKEN = "8781081982:AAF5NLXtFqZU8XGfm0u5ErfvFWTmWmsLO2k"
 bot = telebot.TeleBot(TOKEN)
-
-@bot.message_handler(commands=['start'])
-def welcome(message):
-    bot.reply_to(message, "🔎 أرسل اليوزر وسأستخرج لك بيانات Instagram (Selfie Recovery Exploit) فقط.")
 
 @bot.message_handler(func=lambda m: True)
 def handle_search(message):
     user_input = message.text.strip().replace('@', '')
-    wait_msg = bot.reply_to(message, f"⏳ جاري البحث عن `{user_input}` في قسم اليوزرات...")
+    # رسالة انتظار بسيطة كما طلبت
+    wait_msg = bot.reply_to(message, "⏳ جاري البحث...")
 
-    # الرابط المباشر للبحث مع تحديد الـ Type كـ Username
+    # طلب البحث مع تحديد النوع كـ Username
     search_url = f"https://breach.vip/api/search/{user_input}?type=username"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://breach.vip/",
-        "Accept": "application/json, text/plain, */*"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://breach.vip/"
     }
 
     try:
-        # استخدام curl_cffi لتخطي حماية الموقع (Cloudflare)
+        # محاكاة المتصفح لتخطي صفحة الحماية
         response = requests.get(search_url, headers=headers, impersonate="chrome110", timeout=30)
 
         if response.status_code == 200:
-            content = response.text
+            full_text = response.text
             
-            # البحث عن قطعة الـ Instagram المحددة
-            if "Instagram (Selfie Recovery Exploit)" in content:
-                # تقسيم النص للوصول للجزء المطلوب فقط
-                parts = content.split("Instagram (Selfie Recovery Exploit)")
-                sub_content = parts[1].split("-")[0] # أخذ البيانات حتى بداية القسم التالي
-                
-                # تنظيف واستخراج الـ Username والـ Email
-                lines = [line.strip() for line in sub_content.split('\n') if line.strip()]
-                final_data = []
-                for line in lines:
-                    if "username" in line.lower() or "email" in line.lower():
-                        final_data.append(f"🔹 {line}")
+            # التأكد من وجود قسم الانستقرام المطلوب
+            target_section = "Instagram (Selfie Recovery Exploit)"
+            if target_section in full_text:
+                # استخراج الجزء الذي يلي القسم المطلوب مباشرة
+                start_index = full_text.find(target_section)
+                # نأخذ 500 حرف بعد العنوان لضمان شمول اليوزر والايميل
+                relevant_part = full_text[start_index:start_index+500]
 
-                if final_data:
-                    msg = "✅ **تم العثور على بيانات Instagram:**\n\n" + "\n".join(final_data)
-                    bot.edit_message_text(msg, message.chat.id, wait_msg.message_id, parse_mode="Markdown")
+                # استخدام Regex لاستخراج اليوزر والايميل من النص
+                found_user = re.search(r"username\s+(.*)", relevant_part)
+                found_email = re.search(r"email\s+([\w\.-]+@[\w\.-]+)", relevant_part)
+
+                if found_user and found_email:
+                    res_username = found_user.group(1).strip()
+                    res_email = found_email.group(1).strip()
+
+                    # الرد النهائي بالبيانات فقط
+                    result_msg = f"✅ **تم العثور على البيانات:**\n\n" \
+                                 f"👤 **Username:** `{res_username}`\n" \
+                                 f"📧 **Email:** `{res_email}`"
+                    bot.edit_message_text(result_msg, message.chat.id, wait_msg.message_id, parse_mode="Markdown")
                 else:
-                    bot.edit_message_text("❌ لم أتمكن من تنسيق البيانات، رغم وجود القسم.", message.chat.id, wait_msg.message_id)
+                    bot.edit_message_text("❌ القسم موجود ولكن لم أستطع استخراج البيانات بدقة.", message.chat.id, wait_msg.message_id)
             else:
-                bot.edit_message_text(f"❌ لم يتم العثور على 'Selfie Recovery Exploit' لهذا اليوزر.", message.chat.id, wait_msg.message_id)
-        
+                bot.edit_message_text(f"❌ لم يتم العثور على `{user_input}` في قسم Instagram بالموقع.", message.chat.id, wait_msg.message_id)
         else:
-            bot.edit_message_text(f"⚠️ فشل الاتصال بالموقع (كود: {response.status_code}). حاول لاحقاً.", message.chat.id, wait_msg.message_id)
+            bot.edit_message_text("⚠️ فشل في الوصول للموقع، قد تكون الحماية مفعلة حالياً.", message.chat.id, wait_msg.message_id)
 
     except Exception as e:
-        bot.edit_message_text(f"❌ حدث خطأ فني: {str(e)}", message.chat.id, wait_msg.message_id)
+        bot.edit_message_text(f"❌ خطأ: {str(e)}", message.chat.id, wait_msg.message_id)
 
 bot.infinity_polling()
