@@ -10,14 +10,14 @@ bot = telebot.TeleBot(TOKEN)
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "🔎 ارسل اليوزر نيم للبحث")
+    bot.reply_to(message, "🔎 ارسل اليوزر للبحث (راح أطلع لك إنستقرام فقط)")
 
 
 @bot.message_handler(func=lambda m: True)
 def search_user(message):
     username = message.text.strip()
 
-    # 🔥 رابط الموقع (API)
+    # 🔥 رابط الموقع
     url = f"https://breach.vip/api/search/{username}"
 
     headers = {
@@ -27,29 +27,39 @@ def search_user(message):
     try:
         res = requests.get(url, headers=headers, timeout=10)
 
-        if res.status_code == 200:
-            try:
-                data = res.json()
-            except:
-                bot.reply_to(message, "❌ الموقع رجع بيانات غير مفهومة")
-                return
+        if res.status_code != 200:
+            bot.reply_to(message, "❌ فشل الاتصال بالموقع")
+            return
 
-            if not data:
-                bot.reply_to(message, "❌ لا يوجد بيانات")
-            else:
-                # ترتيب النتائج
-                result = ""
+        text = res.text.lower()
 
-                for item in data[:10]:  # أول 10 نتائج فقط
-                    result += f"📧 Email: {item.get('email','-')}\n"
-                    result += f"👤 User: {item.get('username','-')}\n"
-                    result += f"🔑 Pass: {item.get('password','-')}\n"
-                    result += f"{'-'*20}\n"
+        # ❌ إذا الموقع محمي
+        if "<html" in text:
+            bot.reply_to(message, "❌ الموقع محمي أو ما يسمح للبوت")
+            return
 
-                bot.reply_to(message, f"✅ النتائج:\n\n{result}")
+        # ❌ إذا ما فيه إنستقرام
+        if "instagram" not in text:
+            bot.reply_to(message, "❌ ما حصلت حسابات انستقرام")
+            return
 
-        else:
-            bot.reply_to(message, f"❌ فشل الاتصال (Status: {res.status_code})")
+        # 🔥 فلترة نتائج إنستقرام
+        lines = res.text.split("\n")
+        result = ""
+        capture = False
+
+        for line in lines:
+            if "instagram" in line.lower():
+                capture = True
+
+            if capture:
+                result += line + "\n"
+
+                # نوقف بعد عدد أسطر معين
+                if result.count("\n") > 20:
+                    break
+
+        bot.reply_to(message, f"📸 نتائج انستقرام:\n\n{result[:4000]}")
 
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ:\n{e}")
