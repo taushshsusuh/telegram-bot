@@ -1,26 +1,25 @@
-# استخدم صورة Python خفيفة كقاعدة
+# Dockerfile
+# استخدام صورة Python خفيفة الوزن كأساس
 FROM python:3.9-slim-buster
 
 # تعيين دليل العمل داخل الحاوية
 WORKDIR /app
 
-# تثبيت متطلبات نظام التشغيل لـ Playwright
-# تتضمن Chromium والمتطلبات الأخرى
-RUN apt-get update && apt-get install -y \
-    chromium \
-    python3-pip \
-    --no-install-recommends && \
-    rm -rf /var/lib/apt/lists/*
-
-# تثبيت Playwright driver
-RUN playwright install-deps
-
-# نسخ ملفات المتطلبات وتثبيتها
+# نسخ ملف requirements.txt وتثبيت التبعيات
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# نسخ باقي ملفات التطبيق
+# تثبيت متصفحات Playwright وتوابعها
+# هذا الأمر سيقوم بتنزيل المتصفحات الضرورية مثل Chromium
+# و '--with-deps' سيقوم بتثبيت تبعيات النظام اللازمة للمتصفحات
+RUN playwright install --with-deps
+
+# نسخ باقي ملفات المشروع إلى دليل العمل
 COPY . .
 
-# تشغيل البوت
+# تعيين متغير البيئة لـ Playwright
+# هذا يخبر Playwright أين يبحث عن المتصفحات التي تم تنزيلها
+ENV PLAYWRIGHT_BROWSERS_PATH="/ms-playwright"
+
+# الأمر الذي سيتم تشغيله عند بدء تشغيل الحاوية
 CMD ["python", "bot.py"]
