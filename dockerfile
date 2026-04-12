@@ -1,7 +1,7 @@
-# استخدام نسخة بايثون متوافقة
+# استخدام نسخة بايثون خفيفة ومستقرة
 FROM python:3.13-slim
 
-# تثبيت المكتبات الأساسية التي يحتاجها المتصفح للعمل على نظام لينكس
+# تثبيت الحزم الأساسية لنظام التشغيل لضمان عمل المتصفح
 RUN apt-get update && apt-get install -y \
     libnss3 \
     libnspr4 \
@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
+# تحديد مسار مخصص للمتصفح لمنع مشاكل الصلاحيات
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 # تحديد مجلد العمل
 WORKDIR /app
 
@@ -25,9 +28,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# تثبيت متصفح كروم الخاص بـ playwright
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# تثبيت المتصفح والاعتمادات الخاصة به في المسار المخصص
+RUN PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install chromium
+RUN PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install-deps
 
 # نسخ باقي ملفات البوت
 COPY . .
