@@ -1,26 +1,26 @@
-FROM python:3.13-slim
+# استخدم صورة Python خفيفة كقاعدة
+FROM python:3.9-slim-buster
 
-# تثبيت متصفح كروم والحزم اللازمة للعمل مباشرة من مخازن النظام
+# تعيين دليل العمل داخل الحاوية
+WORKDIR /app
+
+# تثبيت متطلبات نظام التشغيل لـ Playwright
+# تتضمن Chromium والمتطلبات الأخرى
 RUN apt-get update && apt-get install -y \
     chromium \
-    chromium-driver \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libgbm1 \
-    && rm -rf /var/lib/apt/lists/*
+    python3-pip \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# تثبيت Playwright driver
+RUN playwright install-deps
+
+# نسخ ملفات المتطلبات وتثبيتها
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# نسخ باقي ملفات التطبيق
 COPY . .
 
-# إخبار البرنامج باستخدام المتصفح الموجود في النظام
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-
+# تشغيل البوت
 CMD ["python", "bot.py"]
