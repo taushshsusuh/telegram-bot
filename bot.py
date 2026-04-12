@@ -1,49 +1,74 @@
 import telebot
 from playwright.sync_api import sync_playwright
-import os
+import time
 
 TOKEN = "8781081982:AAHydfh5K-vllcSej_hGzk5LjiH0WmC1oRA"
 bot = telebot.TeleBot(TOKEN)
 
-def get_data(username):
+def get_data(search_query):
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto("https://breach.vip/") # ادخل رابط البحث المباشر
+        # تشغيل المتصفح (Chromium)
+        browser = p.chromium.launch(headless=True) 
+        context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        page = context.new_page()
         
-        # 1. تحديد خيار username (يجب استبدال 'select' بالـ Selector الصحيح)
-        page.select_option('select[name="type"]', 'username')
-        
-        # 2. إدخال اليوزر والبحث
-        page.fill('input[name="query"]', username)
-        page.click('button[type="submit"]')
-        
-        # 3. انتظار النتائج
-        page.wait_for_selector('.result-item') # استبدل بكلاس النتائج الحقيقي
-        
-        # 4. الفلترة للـ Instagram فقط
-        results = page.query_selector_all('.result-item')
-        final_msg = ""
-        
-        for item in results:
-            text = item.inner_text().lower()
-            if "instagram" in text:
-                # هنا يتم استخراج البيانات (اليوزر والايميل)
-                # تحتاج لضبط الـ Selectors بناءً على شكل النتائج في الموقع
-                user = item.query_selector('.username').inner_text()
-                email = item.query_selector('.email').inner_text()
-                final_msg += f"👤 {user}\n📧 {email}\n\n"
-        
-        browser.close()
-        return final_msg if final_msg else "لم يتم العثور على نتائج Instagram"
+        try:
+            # 1. الدخول للموقع
+            page.goto("https://breach.vip/", wait_until="networkidle")
+            
+            # 2. كتابة اليوزر في الخانة الأولى
+            page.fill('input[placeholder="Search term"]', search_query)
+            
+            # 3. اختيار "Username" من الأزرار (حسب الفيديو هي أزرار وليست قائمة منسدلة)
+            page.click('button:has-text("Username")')
+            
+            # 4. الضغط على زر Search
+            page.click('button:has-text("Search")')
+            
+            # انتظار ظهور النتائج (تأخير بسيط للتأكد من التحميل)
+            page.wait_for_timeout(5000) 
+            
+            # 5. جلب كل كتل النتائج (التي تبدأ بـ - اسم الموقع)
+            results = page.query_selector_all('div.mb-4') # هذا الكلاس الشائع لكتل النتائج
+            
+            final_msg = f"🔍 نتائج Instagram لليوزر: {search_query}\n\n"
+            found = False
+            
+            for item in results:
+                content = item.inner_text()
+                content_lower = content.lower()
+                
+                # الفلترة لـ Instagram فقط (مثل Selfie و Joel)
+                if "instagram" in content_lower:
+                    # استخراج اليوزر والايميل من النص
+                    lines = content.split('\n')
+                    username = "غير موجود"
+                    email = "غير موجود"
+                    
+                    for line in lines:
+                        if "username" in line.lower():
+                            username = line.split()[-1]
+                        if "email" in line.lower():
+                            email = line.split()[-1]
+                    
+                    final_msg += f"📱 المصدر: Instagram\n👤 اليوزر: {username}\n📧 الإيميل: {email}\n"
+                    final_msg += "------------------------\n"
+                    found = True
+            
+            browser.close()
+            if found:
+                return final_msg
+            else:
+                return "❌ لم يتم العثور على نتائج تخص Instagram لهذا اليوزر."
+
+        except Exception as e:
+            browser.close()
+            return f"⚠️ حدث خطأ أثناء المحاكاة: {str(e)}"
 
 @bot.message_handler(func=lambda m: True)
-def search(message):
-    wait = bot.reply_to(message, "🔍 جاري البحث والفلترة...")
-    try:
-        res = get_data(message.text)
-        bot.edit_message_text(res, message.chat.id, wait.message_id)
-    except Exception as e:
-        bot.edit_message_text(f"حدث خطأ: {str(e)}", message.chat.id, wait.message_id)
+def handle_message(message):
+    wait_msg = bot.reply_to(message, "⏳ جاري تشغيل المتصفح والبحث في Instagram... (قد يستغرق دقيقة)")
+    result = get_data(message.text.strip())
+    bot.edit_message_text(result, message.chat.id, wait_msg.message_id)
 
 bot.infinity_polling()
