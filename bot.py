@@ -6,7 +6,12 @@ bot = telebot.TeleBot(TOKEN)
 
 def get_data(search_query):
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # استخدام المتصفح المثبت في النظام مع إعدادات الحاويات
+        browser = p.chromium.launch(
+            headless=True,
+            executable_path='/usr/bin/chromium',
+            args=['--no-sandbox', '--disable-dev-shm-usage']
+        )
         page = browser.new_page()
         page.goto("https://breach.vip/", wait_until="networkidle")
         page.fill('input[placeholder="Search term"]', search_query)
@@ -14,15 +19,11 @@ def get_data(search_query):
         page.click('button:has-text("Search")')
         page.wait_for_timeout(5000)
         
-        # استخراج النتائج ككتل نصية
         elements = page.query_selector_all('div.mb-4')
         final_msg = ""
         
         for el in elements:
-            # هنا نقوم بتنظيف النص تماماً من أي مسافات غريبة أو رموز
             text = " ".join(el.inner_text().split()).lower()
-            
-            # البحث المرن
             if "instagram" in text:
                 final_msg += f"📱 {text[:500]}\n-----------------\n"
         
