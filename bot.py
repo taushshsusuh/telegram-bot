@@ -7,9 +7,7 @@ import random
 TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
-CHANNEL = "@rr_t_yy"
-
-# 🔥 بروكسيات (تقدر تغيرها)
+# 🔥 بروكسيات
 PROXIES = [
     "http://104.248.151.93:9090",
     "http://128.199.254.13:9090",
@@ -18,15 +16,6 @@ PROXIES = [
     "http://172.105.130.80:8888",
     "http://178.128.243.121:3128",
 ]
-
-
-# ✅ فحص الاشتراك
-def is_subscribed(user_id):
-    try:
-        member = bot.get_chat_member(CHANNEL, user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except:
-        return False
 
 
 # 🔁 اختيار بروكسي شغال
@@ -114,18 +103,9 @@ def get_data(search_query):
     return "⚠️ فشل (حظر مؤقت أو بروكسي ضعيف)"
 
 
-# 🔍 البحث
+# 🔍 البحث (بدون اشتراك)
 @bot.message_handler(func=lambda m: True)
 def search(message):
-
-    # 🔒 تحقق اشتراك
-    if not is_subscribed(message.from_user.id):
-        bot.reply_to(
-            message,
-            "❌ لازم تشترك أولاً:\nhttps://t.me/rr_t_yy"
-        )
-        return
-
     wait = bot.reply_to(message, "🔍 جاري البحث...")
 
     result = get_data(message.text)
