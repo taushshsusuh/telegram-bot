@@ -19,7 +19,7 @@ def start(message):
 def scrape_data(query):
     now = time.time()
 
-    # كاش
+    # 🧠 كاش
     if query in CACHE:
         data, t = CACHE[query]
         if now - t < CACHE_TTL:
@@ -29,17 +29,28 @@ def scrape_data(query):
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"]
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-setuid-sandbox",
+                    "--no-first-run",
+                    "--no-zygote",
+                    "--single-process"
+                ]
             )
 
             page = browser.new_page()
-            page.goto("https://breach.vip/", timeout=15000)
+
+            # 🔥 timeout أعلى
+            page.goto("https://breach.vip/", timeout=30000)
 
             page.fill('input[placeholder="Search term"]', query)
             page.click('button:has-text("Username")')
             page.click('button:has-text("Search")')
 
-            page.wait_for_timeout(3000)
+            # ⏳ انتظار أطول
+            page.wait_for_timeout(5000)
 
             elements = page.query_selector_all("div.mb-4")
 
@@ -77,12 +88,13 @@ def scrape_data(query):
                     "━━━━━━━━━━━━━━━\n\n"
                 )
 
+            # 💾 حفظ بالكاش
             CACHE[query] = (msg, now)
 
             return msg
 
-    except:
-        return "⚠️ خطأ أو الموقع بطيء، حاول مرة ثانية"
+    except Exception as e:
+        return "⚠️ الموقع بطيء أو السيرفر ضعيف، حاول مرة ثانية"
 
 
 def handle(message):
@@ -90,11 +102,14 @@ def handle(message):
 
     result = scrape_data(message.text.strip())
 
-    bot.edit_message_text(
-        result,
-        message.chat.id,
-        wait.message_id
-    )
+    try:
+        bot.edit_message_text(
+            result,
+            message.chat.id,
+            wait.message_id
+        )
+    except:
+        bot.send_message(message.chat.id, result)
 
 
 @bot.message_handler(func=lambda m: True)
@@ -102,5 +117,5 @@ def search(message):
     threading.Thread(target=handle, args=(message,)).start()
 
 
-print("🔥 BOT RUNNING (NO API MODE)")
+print("🔥 BOT RUNNING (FAST SCRAPER MODE)")
 bot.infinity_polling()
