@@ -1,6 +1,6 @@
 import os
 import telebot
-from playwright.sync_api import sync_playwright
+import requests
 import threading
 import time
 
@@ -10,13 +10,24 @@ bot = telebot.TeleBot(TOKEN, threaded=True)
 CACHE = {}
 CACHE_TTL = 300
 
+USER_COOLDOWN = {}
+
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "👋 أهلاً بك في البوت")
+    bot.reply_to(message, "👋 أهلاً بك")
 
 
-def scrape_data(query):
+def is_limited(user_id):
+    now = time.time()
+    if user_id in USER_COOLDOWN:
+        if now - USER_COOLDOWN[user_id] < 2:
+            return True
+    USER_COOLDOWN[user_id] = now
+    return False
+
+
+def get_data(query):
     now = time.time()
 
     # 🧠 كاش
@@ -25,89 +36,64 @@ def scrape_data(query):
         if now - t < CACHE_TTL:
             return data
 
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--disable-setuid-sandbox",
-                    "--no-first-run",
-                    "--no-zygote",
-                    "--single-process"
-                ]
-            )
+    url = "https://breach.vip/api/searches"
 
-            page = browser.new_page()
+    payload = {
+        "term": query,
+        "fields": ["email", "username"]
+    }
 
-            # 🔥 timeout أعلى
-            page.goto("https://breach.vip/", timeout=30000)
+    for _ in range(3):
+        try:
+            r = requests.post(url, json=payload, timeout=6)
 
-            page.fill('input[placeholder="Search term"]', query)
-            page.click('button:has-text("Username")')
-            page.click('button:has-text("Search")')
+            if r.status_code == 429:
+                continue
 
-            # ⏳ انتظار أطول
-            page.wait_for_timeout(5000)
+            if r.status_code != 200:
+                continue
 
-            elements = page.query_selector_all("div.mb-4")
+            data = r.json()
+            results = data.get("results", [])
 
-            results = []
+            ig = [x for x in results if "instagram" in str(x).lower()]
 
-            for el in elements:
-                text = el.inner_text().lower()
-
-                if "instagram" in text:
-                    username = "غير متوفر"
-                    email = "غير متوفر"
-
-                    lines = text.split("\n")
-
-                    for line in lines:
-                        if "username" in line:
-                            username = line.split()[-1]
-                        if "email" in line:
-                            email = line.split()[-1]
-
-                    results.append((username, email))
-
-            browser.close()
-
-            if not results:
+            if not ig:
                 return "❌ لا توجد نتائج"
 
             msg = "🔎 نتائج بحثك:\n\n"
 
-            for u, e in results[:10]:
+            for item in ig[:10]:
                 msg += (
                     "━━━━━━━━━━━━━━━\n"
-                    f"👤 {u}\n"
-                    f"📧 {e}\n"
+                    f"👤 {item.get('username','غير متوفر')}\n"
+                    f"📧 {item.get('email','غير متوفر')}\n"
                     "━━━━━━━━━━━━━━━\n\n"
                 )
 
-            # 💾 حفظ بالكاش
             CACHE[query] = (msg, now)
 
             return msg
 
-    except Exception as e:
-        return "⚠️ الموقع بطيء أو السيرفر ضعيف، حاول مرة ثانية"
+        except:
+            continue
+
+    return "⚠️ ضغط مؤقت، جرب بعد ثواني"
 
 
 def handle(message):
+    user_id = message.from_user.id
+
+    if is_limited(user_id):
+        bot.reply_to(message, "⏳ انتظر شوي")
+        return
+
     wait = bot.reply_to(message, "🔍 جاري البحث...")
 
-    result = scrape_data(message.text.strip())
+    result = get_data(message.text.strip())
 
     try:
-        bot.edit_message_text(
-            result,
-            message.chat.id,
-            wait.message_id
-        )
+        bot.edit_message_text(result, message.chat.id, wait.message_id)
     except:
         bot.send_message(message.chat.id, result)
 
@@ -117,5 +103,5 @@ def search(message):
     threading.Thread(target=handle, args=(message,)).start()
 
 
-print("🔥 BOT RUNNING (FAST SCRAPER MODE)")
+print("🔥 BOT RUNNING (FAST API MODE)")
 bot.infinity_polling()
