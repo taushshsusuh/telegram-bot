@@ -27,6 +27,21 @@ def is_limited(user_id):
     return False
 
 
+def fetch(query):
+    url = "https://breach.vip/api/searches"
+
+    payload = {
+        "term": query,
+        "fields": ["email", "username"],
+        "wildcard": False
+    }
+
+    try:
+        return requests.post(url, json=payload, timeout=5)
+    except:
+        return None
+
+
 def get_data(query):
     now = time.time()
 
@@ -36,49 +51,53 @@ def get_data(query):
         if now - t < CACHE_TTL:
             return data
 
-    url = "https://breach.vip/api/searches"
+    results = []
 
-    payload = {
-        "term": query,
-        "fields": ["email", "username"]
-    }
+    # 🔁 نحاول أكثر من مرة
+    for attempt in range(5):
+        res = fetch(query)
 
-    for _ in range(3):
+        if not res:
+            continue
+
+        if res.status_code == 429:
+            time.sleep(1)
+            continue
+
+        if res.status_code != 200:
+            continue
+
         try:
-            r = requests.post(url, json=payload, timeout=6)
-
-            if r.status_code == 429:
-                continue
-
-            if r.status_code != 200:
-                continue
-
-            data = r.json()
-            results = data.get("results", [])
-
-            ig = [x for x in results if "instagram" in str(x).lower()]
-
-            if not ig:
-                return "❌ لا توجد نتائج"
-
-            msg = "🔎 نتائج بحثك:\n\n"
-
-            for item in ig[:10]:
-                msg += (
-                    "━━━━━━━━━━━━━━━\n"
-                    f"👤 {item.get('username','غير متوفر')}\n"
-                    f"📧 {item.get('email','غير متوفر')}\n"
-                    "━━━━━━━━━━━━━━━\n\n"
-                )
-
-            CACHE[query] = (msg, now)
-
-            return msg
-
+            data = res.json()
         except:
             continue
 
-    return "⚠️ ضغط مؤقت، جرب بعد ثواني"
+        results = data.get("results", [])
+
+        if results:
+            break
+
+    if not results:
+        return "⚠️ السيرفر مزدحم جدًا، حاول بعد دقيقة"
+
+    ig = [x for x in results if "instagram" in str(x).lower()]
+
+    if not ig:
+        return "❌ لا توجد نتائج"
+
+    msg = "🔎 نتائج بحثك:\n\n"
+
+    for item in ig[:10]:
+        msg += (
+            "━━━━━━━━━━━━━━━\n"
+            f"👤 {item.get('username','غير متوفر')}\n"
+            f"📧 {item.get('email','غير متوفر')}\n"
+            "━━━━━━━━━━━━━━━\n\n"
+        )
+
+    CACHE[query] = (msg, now)
+
+    return msg
 
 
 def handle(message):
@@ -103,5 +122,5 @@ def search(message):
     threading.Thread(target=handle, args=(message,)).start()
 
 
-print("🔥 BOT RUNNING (FAST API MODE)")
+print("🔥 BOT RUNNING (ULTRA STABLE MODE)")
 bot.infinity_polling()
