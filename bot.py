@@ -1,22 +1,14 @@
 import os
 import telebot
-import requests
-import time
+from playwright.sync_api import sync_playwright
 import threading
-from queue import Queue
+import time
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
-# 🧠 كاش
 CACHE = {}
 CACHE_TTL = 300
-
-# 🛡️ Queue لتنظيم الطلبات
-REQUEST_QUEUE = Queue()
-
-# 🛡️ منع السبام
-USER_LAST = {}
 
 
 @bot.message_handler(commands=['start'])
@@ -24,106 +16,91 @@ def start(message):
     bot.reply_to(message, "👋 أهلاً بك في البوت")
 
 
-def fetch_api(query):
-    url = "https://breach.vip/api/searches"
-
-    payload = {
-        "term": query,
-        "fields": ["email", "username"],
-        "wildcard": False
-    }
-
-    try:
-        return requests.post(url, json=payload, timeout=6)
-    except:
-        return None
-
-
-def process_request(chat_id, message_id, query):
+def scrape_data(query):
     now = time.time()
 
-    # ✅ كاش
+    # كاش
     if query in CACHE:
         data, t = CACHE[query]
         if now - t < CACHE_TTL:
-            bot.edit_message_text(data, chat_id, message_id)
-            return
+            return data
 
-    # 🔁 retry ذكي
-    for attempt in range(5):
-        res = fetch_api(query)
-
-        if not res:
-            continue
-
-        if res.status_code == 429:
-            time.sleep(1.5)  # تهدئة بدل الحظر
-            continue
-
-        if res.status_code != 200:
-            continue
-
-        try:
-            data = res.json()
-        except:
-            continue
-
-        results = data.get("results", [])
-
-        ig = [x for x in results if "instagram" in str(x).lower()]
-
-        if not ig:
-            bot.edit_message_text("❌ لا توجد نتائج", chat_id, message_id)
-            return
-
-        msg = "🔎 نتائج بحثك:\n\n"
-
-        for item in ig[:10]:
-            msg += (
-                "━━━━━━━━━━━━━━━\n"
-                f"👤 {item.get('username','غير متوفر')}\n"
-                f"📧 {item.get('email','غير متوفر')}\n"
-                "━━━━━━━━━━━━━━━\n\n"
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
             )
 
-        CACHE[query] = (msg, now)
+            page = browser.new_page()
+            page.goto("https://breach.vip/", timeout=15000)
 
-        bot.edit_message_text(msg, chat_id, message_id)
-        return
+            page.fill('input[placeholder="Search term"]', query)
+            page.click('button:has-text("Username")')
+            page.click('button:has-text("Search")')
 
-    bot.edit_message_text("⚠️ ضغط عالي، حاول بعد شوي", chat_id, message_id)
+            page.wait_for_timeout(3000)
+
+            elements = page.query_selector_all("div.mb-4")
+
+            results = []
+
+            for el in elements:
+                text = el.inner_text().lower()
+
+                if "instagram" in text:
+                    username = "غير متوفر"
+                    email = "غير متوفر"
+
+                    lines = text.split("\n")
+
+                    for line in lines:
+                        if "username" in line:
+                            username = line.split()[-1]
+                        if "email" in line:
+                            email = line.split()[-1]
+
+                    results.append((username, email))
+
+            browser.close()
+
+            if not results:
+                return "❌ لا توجد نتائج"
+
+            msg = "🔎 نتائج بحثك:\n\n"
+
+            for u, e in results[:10]:
+                msg += (
+                    "━━━━━━━━━━━━━━━\n"
+                    f"👤 {u}\n"
+                    f"📧 {e}\n"
+                    "━━━━━━━━━━━━━━━\n\n"
+                )
+
+            CACHE[query] = (msg, now)
+
+            return msg
+
+    except:
+        return "⚠️ خطأ أو الموقع بطيء، حاول مرة ثانية"
 
 
-# 🔥 Worker (ينفذ الطلبات بهدوء)
-def worker():
-    while True:
-        chat_id, msg_id, query = REQUEST_QUEUE.get()
-        process_request(chat_id, msg_id, query)
-        time.sleep(0.7)  # أهم سطر (يمنع الحظر)
-        REQUEST_QUEUE.task_done()
+def handle(message):
+    wait = bot.reply_to(message, "🔍 جاري البحث...")
 
+    result = scrape_data(message.text.strip())
 
-# تشغيل worker
-threading.Thread(target=worker, daemon=True).start()
+    bot.edit_message_text(
+        result,
+        message.chat.id,
+        wait.message_id
+    )
 
 
 @bot.message_handler(func=lambda m: True)
 def search(message):
-    user_id = message.from_user.id
-    now = time.time()
-
-    # 🛡️ منع سبام
-    if user_id in USER_LAST and now - USER_LAST[user_id] < 1:
-        bot.reply_to(message, "⏳ انتظر شوي")
-        return
-
-    USER_LAST[user_id] = now
-
-    wait = bot.reply_to(message, "🔍 جاري البحث...")
-
-    # 🧠 نضيف الطلب للـ Queue بدل التنفيذ المباشر
-    REQUEST_QUEUE.put((message.chat.id, wait.message_id, message.text.strip()))
+    threading.Thread(target=handle, args=(message,)).start()
 
 
-print("🔥 BOT RUNNING (ANTI-LIMIT MODE)")
+print("🔥 BOT RUNNING (NO API MODE)")
 bot.infinity_polling()
