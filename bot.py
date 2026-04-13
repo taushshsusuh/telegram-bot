@@ -45,13 +45,9 @@ def get_data(query):
 
     all_results = []
 
-    # 🔁 نحاول عدة مرات
     for _ in range(5):
         try:
             r = requests.post(url, json=payload, timeout=6)
-
-            if r.status_code == 429:
-                continue
 
             if r.status_code != 200:
                 continue
@@ -65,25 +61,36 @@ def get_data(query):
         except:
             continue
 
+    # ❌ إذا فعلاً ما فيه شيء
     if not all_results:
         return "❌ لا توجد نتائج"
 
-    # 🔍 فلترة Instagram
-    ig = [x for x in all_results if "instagram" in str(x).lower()]
-
-    # 🔥 إذا ما فيه IG يطلع أي شيء بدل ما يسكت
-    if not ig:
-        ig = all_results[:5]
-
     msg = "🔎 نتائج بحثك:\n\n"
 
-    for item in ig[:10]:
+    count = 0
+
+    for item in all_results:
+        username = item.get("username")
+        email = item.get("email")
+
+        # ✅ نعرض أي شيء فيه بيانات
+        if not username and not email:
+            continue
+
         msg += (
             "━━━━━━━━━━━━━━━\n"
-            f"👤 {item.get('username','غير متوفر')}\n"
-            f"📧 {item.get('email','غير متوفر')}\n"
+            f"👤 {username if username else 'غير متوفر'}\n"
+            f"📧 {email if email else 'غير متوفر'}\n"
             "━━━━━━━━━━━━━━━\n\n"
         )
+
+        count += 1
+
+        if count >= 10:
+            break
+
+    if count == 0:
+        return "❌ لا توجد نتائج"
 
     CACHE[query] = (msg, now)
 
@@ -112,5 +119,5 @@ def search(message):
     threading.Thread(target=handle, args=(message,)).start()
 
 
-print("🔥 BOT RUNNING (BALANCED MODE)")
+print("🔥 BOT RUNNING (FIXED RESULTS)")
 bot.infinity_polling()
