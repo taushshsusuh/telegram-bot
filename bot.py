@@ -3,25 +3,20 @@ import telebot
 import requests
 import time
 import threading
+from queue import Queue
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
 # 🧠 كاش
 CACHE = {}
-CACHE_TTL = 300  # 5 دقائق
+CACHE_TTL = 300
+
+# 🛡️ Queue لتنظيم الطلبات
+REQUEST_QUEUE = Queue()
 
 # 🛡️ منع السبام
-USER_COOLDOWN = {}
-
-
-def is_rate_limited(user_id):
-    now = time.time()
-    if user_id in USER_COOLDOWN:
-        if now - USER_COOLDOWN[user_id] < 2:
-            return True
-    USER_COOLDOWN[user_id] = now
-    return False
+USER_LAST = {}
 
 
 @bot.message_handler(commands=['start'])
@@ -29,90 +24,106 @@ def start(message):
     bot.reply_to(message, "👋 أهلاً بك في البوت")
 
 
-def get_data(search_query):
-    now = time.time()
-
-    # ✅ كاش (يرجع فورًا)
-    if search_query in CACHE:
-        data, timestamp = CACHE[search_query]
-        if now - timestamp < CACHE_TTL:
-            return data
-
-    url = "https://breach.vip/api/search"
+def fetch_api(query):
+    url = "https://breach.vip/api/searches"
 
     payload = {
-        "term": search_query,
-        "fields": ["email", "username"]
+        "term": query,
+        "fields": ["email", "username"],
+        "wildcard": False
     }
 
     try:
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=6
-        )
+        return requests.post(url, json=payload, timeout=6)
+    except:
+        return None
 
-        if response.status_code == 429:
-            return "⚠️ ضغط عالي، جرب بعد ثواني"
 
-        if response.status_code != 200:
-            return f"❌ خطأ API: {response.status_code}"
+def process_request(chat_id, message_id, query):
+    now = time.time()
 
-        data = response.json()
+    # ✅ كاش
+    if query in CACHE:
+        data, t = CACHE[query]
+        if now - t < CACHE_TTL:
+            bot.edit_message_text(data, chat_id, message_id)
+            return
+
+    # 🔁 retry ذكي
+    for attempt in range(5):
+        res = fetch_api(query)
+
+        if not res:
+            continue
+
+        if res.status_code == 429:
+            time.sleep(1.5)  # تهدئة بدل الحظر
+            continue
+
+        if res.status_code != 200:
+            continue
+
+        try:
+            data = res.json()
+        except:
+            continue
+
         results = data.get("results", [])
 
-        instagram_results = [
-            item for item in results
-            if "instagram" in str(item).lower()
-        ]
+        ig = [x for x in results if "instagram" in str(x).lower()]
 
-        if not instagram_results:
-            return "❌ لا توجد نتائج"
+        if not ig:
+            bot.edit_message_text("❌ لا توجد نتائج", chat_id, message_id)
+            return
 
         msg = "🔎 نتائج بحثك:\n\n"
 
-        for item in instagram_results[:10]:
-            username = item.get("username", "غير متوفر")
-            email = item.get("email", "غير متوفر")
-
+        for item in ig[:10]:
             msg += (
                 "━━━━━━━━━━━━━━━\n"
-                f"👤 {username}\n"
-                f"📧 {email}\n"
+                f"👤 {item.get('username','غير متوفر')}\n"
+                f"📧 {item.get('email','غير متوفر')}\n"
                 "━━━━━━━━━━━━━━━\n\n"
             )
 
-        # 💾 حفظ في الكاش
-        CACHE[search_query] = (msg, now)
+        CACHE[query] = (msg, now)
 
-        return msg
-
-    except Exception as e:
-        return "⚠️ خطأ مؤقت، حاول مرة ثانية"
-
-
-def handle_search(message):
-    user_id = message.from_user.id
-
-    if is_rate_limited(user_id):
-        bot.reply_to(message, "⏳ انتظر شوي")
+        bot.edit_message_text(msg, chat_id, message_id)
         return
 
-    wait = bot.reply_to(message, "🔍 جاري البحث...")
+    bot.edit_message_text("⚠️ ضغط عالي، حاول بعد شوي", chat_id, message_id)
 
-    result = get_data(message.text.strip())
 
-    bot.edit_message_text(
-        result,
-        message.chat.id,
-        wait.message_id
-    )
+# 🔥 Worker (ينفذ الطلبات بهدوء)
+def worker():
+    while True:
+        chat_id, msg_id, query = REQUEST_QUEUE.get()
+        process_request(chat_id, msg_id, query)
+        time.sleep(0.7)  # أهم سطر (يمنع الحظر)
+        REQUEST_QUEUE.task_done()
+
+
+# تشغيل worker
+threading.Thread(target=worker, daemon=True).start()
 
 
 @bot.message_handler(func=lambda m: True)
 def search(message):
-    threading.Thread(target=handle_search, args=(message,)).start()
+    user_id = message.from_user.id
+    now = time.time()
+
+    # 🛡️ منع سبام
+    if user_id in USER_LAST and now - USER_LAST[user_id] < 1:
+        bot.reply_to(message, "⏳ انتظر شوي")
+        return
+
+    USER_LAST[user_id] = now
+
+    wait = bot.reply_to(message, "🔍 جاري البحث...")
+
+    # 🧠 نضيف الطلب للـ Queue بدل التنفيذ المباشر
+    REQUEST_QUEUE.put((message.chat.id, wait.message_id, message.text.strip()))
 
 
-print("⚡ Bot running FAST MODE...")
+print("🔥 BOT RUNNING (ANTI-LIMIT MODE)")
 bot.infinity_polling()
