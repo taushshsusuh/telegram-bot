@@ -27,21 +27,6 @@ def is_limited(user_id):
     return False
 
 
-def fetch(query):
-    url = "https://breach.vip/api/searches"
-
-    payload = {
-        "term": query,
-        "fields": ["email", "username"],
-        "wildcard": False
-    }
-
-    try:
-        return requests.post(url, json=payload, timeout=5)
-    except:
-        return None
-
-
 def get_data(query):
     now = time.time()
 
@@ -51,39 +36,44 @@ def get_data(query):
         if now - t < CACHE_TTL:
             return data
 
-    results = []
+    url = "https://breach.vip/api/searches"
 
-    # 🔁 نحاول أكثر من مرة
-    for attempt in range(5):
-        res = fetch(query)
+    payload = {
+        "term": query,
+        "fields": ["email", "username"]
+    }
 
-        if not res:
-            continue
+    all_results = []
 
-        if res.status_code == 429:
-            time.sleep(1)
-            continue
-
-        if res.status_code != 200:
-            continue
-
+    # 🔁 نحاول عدة مرات
+    for _ in range(5):
         try:
-            data = res.json()
+            r = requests.post(url, json=payload, timeout=6)
+
+            if r.status_code == 429:
+                continue
+
+            if r.status_code != 200:
+                continue
+
+            data = r.json()
+            results = data.get("results", [])
+
+            if results:
+                all_results.extend(results)
+
         except:
             continue
 
-        results = data.get("results", [])
-
-        if results:
-            break
-
-    if not results:
-        return "⚠️ السيرفر مزدحم جدًا، حاول بعد دقيقة"
-
-    ig = [x for x in results if "instagram" in str(x).lower()]
-
-    if not ig:
+    if not all_results:
         return "❌ لا توجد نتائج"
+
+    # 🔍 فلترة Instagram
+    ig = [x for x in all_results if "instagram" in str(x).lower()]
+
+    # 🔥 إذا ما فيه IG يطلع أي شيء بدل ما يسكت
+    if not ig:
+        ig = all_results[:5]
 
     msg = "🔎 نتائج بحثك:\n\n"
 
@@ -122,5 +112,5 @@ def search(message):
     threading.Thread(target=handle, args=(message,)).start()
 
 
-print("🔥 BOT RUNNING (ULTRA STABLE MODE)")
+print("🔥 BOT RUNNING (BALANCED MODE)")
 bot.infinity_polling()
